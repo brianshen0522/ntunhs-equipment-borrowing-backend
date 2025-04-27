@@ -56,16 +56,17 @@ class CRUDAllocation(CRUDBase[Allocation, AllocationCreate, Any]):
             for existing_allocation in allocations_result.scalars().all():
                 await db.delete(existing_allocation)
             
-            # 創建新分配
-            for building_allocation in allocation.buildingAllocations:
-                db_allocation = Allocation(
-                    id=str(uuid.uuid4()),
-                    request_item_id=item.id,
-                    building_id=building_allocation.buildingId,
-                    allocated_quantity=building_allocation.allocatedQuantity,
-                    allocated_by=operator_id,
-                )
-                db.add(db_allocation)
+            # 如果核准數量大於0，創建新分配
+            if allocation.approvedQuantity > 0:
+                for building_allocation in allocation.buildingAllocations:
+                    db_allocation = Allocation(
+                        id=str(uuid.uuid4()),
+                        request_item_id=item.id,
+                        building_id=building_allocation.buildingId,
+                        allocated_quantity=building_allocation.allocatedQuantity,
+                        allocated_by=operator_id,
+                    )
+                    db.add(db_allocation)
         
         # 更新申請狀態和備註
         request.status = "completed"
@@ -104,11 +105,12 @@ class CRUDAllocation(CRUDBase[Allocation, AllocationCreate, Any]):
             return None
         
         # 模擬 PDF 生成並返回路徑
-        pdf_path = f"/storage/requests/{request_id}.pdf"
+        pdf_path = f"storage/requests/{request_id}.pdf"
         
         # 更新 PDF 路徑
         request.pdf_path = pdf_path
         await db.commit()
+        
         return pdf_path
 
     async def send_email(self, db: AsyncSession, *, request_id: str) -> Optional[str]:
