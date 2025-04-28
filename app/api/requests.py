@@ -49,7 +49,6 @@ async def create_request(
         }
     }
 
-
 @router.get("", response_model=RequestListResponse)
 async def get_requests(
     page: int = Query(1, ge=1, description="頁碼"),
@@ -71,7 +70,7 @@ async def get_requests(
         is_academic_staff = True
     except:
         pass
-    
+
     # 非教務處人員只能查看自己的申請
     if not is_academic_staff and userId and userId != current_user.id:
         raise HTTPException(
@@ -84,9 +83,9 @@ async def get_requests(
                 }
             }
         )
-    
+
     # 獲取申請列表
-    requests, total = await crud_request.get_requests(
+    requests, total, status_counts = await crud_request.get_requests(
         db,
         user_id=userId if is_academic_staff else current_user.id,
         status=status,
@@ -96,17 +95,17 @@ async def get_requests(
         limit=limit,
         is_admin=is_academic_staff,
     )
-    
+
     return {
         "success": True,
         "data": {
             "total": total,
             "page": page,
             "limit": limit,
+            "statusCounts": status_counts,
             "requests": requests,
         }
     }
-
 
 @router.get("/{request_id}", response_model=RequestDetailResponse)
 async def get_request_detail(

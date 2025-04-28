@@ -58,7 +58,6 @@ class RequestListItem(BaseModel):
     status: str = Field(..., description="申請狀態")
     createdAt: datetime = Field(..., description="建立時間")
 
-
 class RequestListResponse(ResponseBase):
     data: dict = Field(
         ...,
@@ -66,6 +65,15 @@ class RequestListResponse(ResponseBase):
             "total": 45,
             "page": 1,
             "limit": 20,
+            "statusCounts": {
+                "pending_review": 10,
+                "pending_building_response": 8,
+                "pending_allocation": 5,
+                "completed": 15,
+                "rejected": 4,
+                "closed": 3,
+                "all": 45
+            },
             "requests": [
                 {
                     "requestId": "req_123456",
@@ -80,7 +88,6 @@ class RequestListResponse(ResponseBase):
             ],
         },
     )
-
 
 class StatusHistory(BaseModel):
     status: str = Field(..., description="狀態")

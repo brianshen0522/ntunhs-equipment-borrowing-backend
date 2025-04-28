@@ -68,9 +68,9 @@ class CRUDRequest(CRUDBase[Request, RequestCreate, Any]):
         skip: int = 0,
         limit: int = 20,
         is_admin: bool = False,
-    ) -> Tuple[List[Dict[str, Any]], int]:
+    ) -> Tuple[List[Dict[str, Any]], int, Dict[str, int]]:
         """獲取申請列表
-        
+
         Args:
             user_id: 申請人ID (非管理員只能查看自己的申請)
             status: 申請狀態
@@ -79,6 +79,9 @@ class CRUDRequest(CRUDBase[Request, RequestCreate, Any]):
             skip: 跳過記錄數
             limit: 返回記錄數上限
             is_admin: 是否為管理員 (決定是否能查看所有申請)
+
+        Returns:
+            Tuple[List[Dict[str, Any]], int, Dict[str, int]]: 申請列表, 總數, 各狀態數量
         """
         # 構建查詢條件
         conditions = []
@@ -86,37 +89,37 @@ class CRUDRequest(CRUDBase[Request, RequestCreate, Any]):
             conditions.append(Request.user_id == user_id)
         elif user_id and is_admin:
             conditions.append(Request.user_id == user_id)
-        
+
         if status:
             conditions.append(Request.status == status)
-        
+
         if start_date_from:
             conditions.append(Request.start_date >= start_date_from)
-        
+
         if start_date_to:
             conditions.append(Request.start_date <= start_date_to)
-        
+
         # 計算總數
         count_query = select(func.count()).select_from(Request)
         if conditions:
             count_query = count_query.where(and_(*conditions))
-        
+
         count_result = await db.execute(count_query)
         total = count_result.scalar()
-        
+
         # 獲取數據
         query = (
             select(Request, User.username)
             .join(User, Request.user_id == User.id)
             .order_by(Request.created_at.desc())
         )
-        
+
         if conditions:
             query = query.where(and_(*conditions))
-        
+
         query = query.offset(skip).limit(limit)
         result = await db.execute(query)
-        
+
         # 構建返回數據
         requests = []
         for request, username in result.all():
@@ -130,8 +133,45 @@ class CRUDRequest(CRUDBase[Request, RequestCreate, Any]):
                 "status": request.status,
                 "createdAt": request.created_at,
             })
+
+        # 獲取各狀態的數量
+        status_counts = {}
+        all_statuses = [
+            "pending_review", 
+            "pending_building_response", 
+            "pending_allocation", 
+            "completed", 
+            "rejected", 
+            "closed"
+        ]
         
-        return requests, total
+        # 構建基本的用戶過濾條件（不含狀態），用於計算各狀態數量
+        base_conditions = []
+        if not is_admin and user_id:
+            base_conditions.append(Request.user_id == user_id)
+        elif user_id and is_admin:
+            base_conditions.append(Request.user_id == user_id)
+
+        if start_date_from:
+            base_conditions.append(Request.start_date >= start_date_from)
+
+        if start_date_to:
+            base_conditions.append(Request.start_date <= start_date_to)
+
+        # 獲取各個狀態的申請數量
+        for status_value in all_statuses:
+            status_query = select(func.count()).select_from(Request).where(Request.status == status_value)
+            
+            if base_conditions:
+                status_query = status_query.where(and_(*base_conditions))
+                
+            status_count_result = await db.execute(status_query)
+            status_counts[status_value] = status_count_result.scalar()
+        
+        # 添加所有狀態的總數
+        status_counts["all"] = sum(status_counts.values())
+
+        return requests, total, status_counts
 
     async def get_request_detail(self, db: AsyncSession, *, request_id: str) -> Optional[Dict[str, Any]]:
         """獲取申請詳情"""
