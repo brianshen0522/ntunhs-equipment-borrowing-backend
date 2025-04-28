@@ -97,6 +97,13 @@ class RequestItemDetail(BaseModel):
     approvedQuantity: Optional[int] = Field(None, description="核准數量")
     allocations: List[Dict[str, Any]] = Field([], description="分配詳情")
 
+# Token information model
+class ResponseToken(BaseModel):
+    tokenId: str = Field(..., description="令牌ID")
+    token: str = Field(..., description="令牌值")
+    createdAt: datetime = Field(..., description="創建時間")
+    expiresAt: datetime = Field(..., description="過期時間")
+    isUsed: bool = Field(..., description="是否已使用")
 
 class RequestDetail(BaseModel):
     requestId: str = Field(..., description="申請ID")
@@ -110,6 +117,7 @@ class RequestDetail(BaseModel):
     createdAt: datetime = Field(..., description="建立時間")
     items: List[RequestItemDetail] = Field(..., description="借用項目")
     statusHistory: List[StatusHistory] = Field(..., description="狀態歷史")
+    responseTokens: Optional[List[ResponseToken]] = Field(None, description="回覆令牌")
 
 
 class RequestDetailResponse(ResponseBase):

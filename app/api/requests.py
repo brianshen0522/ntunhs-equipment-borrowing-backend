@@ -119,7 +119,7 @@ async def get_request_detail(
     """
     # 獲取申請詳情
     request_detail = await crud_request.get_request_detail(db, request_id=request_id)
-    
+
     if not request_detail:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -131,7 +131,7 @@ async def get_request_detail(
                 }
             }
         )
-    
+
     # 判斷是否為教務處人員
     is_academic_staff = False
     try:
@@ -139,7 +139,7 @@ async def get_request_detail(
         is_academic_staff = True
     except:
         pass
-    
+
     # 非教務處人員只能查看自己的申請
     if not is_academic_staff and request_detail["userId"] != current_user.id:
         raise HTTPException(
@@ -152,12 +152,11 @@ async def get_request_detail(
                 }
             }
         )
-    
+
     return {
         "success": True,
         "data": request_detail,
     }
-
 
 @router.post("/{request_id}/close", response_model=RequestCloseResponse)
 async def close_request(

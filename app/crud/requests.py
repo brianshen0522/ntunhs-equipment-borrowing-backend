@@ -143,12 +143,12 @@ class CRUDRequest(CRUDBase[Request, RequestCreate, Any]):
         )
         result = await db.execute(query)
         request_result = result.first()
-        
+
         if not request_result:
             return None
-        
+
         request, username = request_result
-        
+
         # 獲取申請項目
         items_query = (
             select(RequestItem, Equipment.name.label("equipment_name"))
@@ -156,7 +156,7 @@ class CRUDRequest(CRUDBase[Request, RequestCreate, Any]):
             .where(RequestItem.request_id == request_id)
         )
         items_result = await db.execute(items_query)
-        
+
         # 獲取狀態歷史
         history_query = (
             select(RequestStatusHistory, User.username.label("operator_name"))
@@ -165,7 +165,7 @@ class CRUDRequest(CRUDBase[Request, RequestCreate, Any]):
             .order_by(RequestStatusHistory.timestamp)
         )
         history_result = await db.execute(history_query)
-        
+
         # 構建返回數據
         items = []
         for item, equipment_name in items_result.all():
@@ -176,7 +176,7 @@ class CRUDRequest(CRUDBase[Request, RequestCreate, Any]):
                 "approvedQuantity": item.approved_quantity,
                 "allocations": []  # 分配詳情需要在實際使用時具體實現
             })
-        
+
         status_history = []
         for history, operator_name in history_result.all():
             status_history.append({
@@ -186,7 +186,7 @@ class CRUDRequest(CRUDBase[Request, RequestCreate, Any]):
                 "operatorName": operator_name,
                 "notes": history.notes,
             })
-        
+
         # 構建詳情
         detail = {
             "requestId": request.id,
@@ -202,6 +202,30 @@ class CRUDRequest(CRUDBase[Request, RequestCreate, Any]):
             "statusHistory": status_history,
         }
         
+        # 如果状态是 pending_building_response，添加响应令牌
+        if request.status == "pending_building_response":
+            from app.models.responses import BuildingResponseToken
+            # 獲取回覆令牌
+            tokens_query = (
+                select(BuildingResponseToken)
+                .where(BuildingResponseToken.request_id == request_id)
+                .order_by(BuildingResponseToken.created_at.desc())
+            )
+            tokens_result = await db.execute(tokens_query)
+            tokens = tokens_result.scalars().all()
+            
+            response_tokens = []
+            for token in tokens:
+                response_tokens.append({
+                    "tokenId": token.id,
+                    "token": token.token,
+                    "createdAt": token.created_at,
+                    "expiresAt": token.expires_at,
+                    "isUsed": token.is_used
+                })
+            
+            detail["responseTokens"] = response_tokens
+
         return detail
 
     async def update_status(
