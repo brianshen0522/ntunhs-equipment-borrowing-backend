@@ -66,29 +66,26 @@ async def _insert_default_settings():
         if line_bot_count == 0:
             query = """
             INSERT INTO line_bot_settings (
-                webhook_url, 
-                channel_access_token, 
-                channel_secret, 
-                building_request_template, 
-                allocation_complete_template, 
-                updated_at, 
+                channel_access_token,
+                target_id,
+                building_request_template,
+                allocation_complete_template,
+                updated_at,
                 updated_by
             ) VALUES (
-                :webhook_url, 
-                :channel_access_token, 
-                :channel_secret, 
-                :building_request_template, 
-                :allocation_complete_template, 
-                CURRENT_TIMESTAMP, 
+                :channel_access_token,
+                :target_id,
+                :building_request_template,
+                :allocation_complete_template,
+                CURRENT_TIMESTAMP,
                 :updated_by
             )
             """
             await session.execute(
-                text(query), 
+                text(query),
                 {
-                    "webhook_url": "https://example.com/webhook/line",
                     "channel_access_token": "dummy_channel_access_token_replace_with_real_token_in_production",
-                    "channel_secret": "dummy_channel_secret_replace_with_real_secret_in_production",
+                    "target_id": "U1234567890abcdef1234567890abcdef", # 預設目標ID，需要改為實際值
                     "building_request_template": "您好，NTUNHS設備借用系統有新的借用申請需要回應。請點擊以下連結填寫可提供的器材數量：{{formUrl}}",
                     "allocation_complete_template": "{{buildingName}}大樓管理員，NTUNHS設備借用系統已完成器材分配，請協助準備借用申請{{requestId}}的器材。",
                     "updated_by": admin_id

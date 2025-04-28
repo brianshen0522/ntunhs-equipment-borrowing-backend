@@ -86,15 +86,31 @@ class LineBotNotificationTemplate(BaseModel):
         return v
 
 
-class LineBotSettings(BaseModel):
-    webhookUrl: str = Field(..., description="LINE Bot Webhook URL")
+class LineBotSettingsSchema(BaseModel):
+    """
+    Pydantic schema for LINE Bot settings - used as input model
+    """
     channelAccessToken: str = Field(..., description="Channel Access Token")
-    channelSecret: str = Field(..., description="Channel Secret")
+    targetId: str = Field(..., description="Target User ID or Group ID")
     notificationTemplates: LineBotNotificationTemplate = Field(..., description="通知訊息樣板")
 
 
+# Alias the class for backwards compatibility and to avoid confusion with database model
+LineBotSettings = LineBotSettingsSchema
+
+
 class LineBotSettingsResponse(ResponseBase):
-    data: LineBotSettings
+    data: dict = Field(
+        ..., 
+        example={
+            "channelAccessToken": "encrypted_token_placeholder",
+            "targetId": "U1234567890abcdef1234567890abcdef",
+            "notificationTemplates": {
+                "buildingManagerRequest": "您好，NTUNHS設備借用系統有新的借用申請需要回應。請點擊以下連結填寫可提供的器材數量：{{formUrl}}",
+                "allocationComplete": "{{buildingName}}大樓管理員，NTUNHS設備借用系統已完成器材分配，請協助準備借用申請{{requestId}}的器材。",
+            }
+        }
+    )
 
 
 class LineBotSettingsUpdateResponse(ResponseBase):
@@ -106,7 +122,7 @@ class LineBotTestResponse(ResponseBase):
         ...,
         example={
             "connectionStatus": "success",
-            "botInfo": {"displayName": "設備借用系統通知"},
+            "botInfo": {"targetId": "U1234567890abcdef1234567890abcdef"},
         },
     )
 

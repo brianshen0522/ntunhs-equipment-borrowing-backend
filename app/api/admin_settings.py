@@ -10,7 +10,7 @@ from app.database import get_db
 from app.models.users import User
 from app.models.settings import LineBotSettings, SmtpSettings, SystemParameters, SystemLog
 from app.schemas.settings import (
-    LineBotSettings as LineBotSettingsSchema,
+    LineBotSettingsSchema,  # Note: renamed from LineBotSettings to avoid confusion
     LineBotSettingsResponse,
     LineBotSettingsUpdateResponse,
     LineBotTestResponse,
@@ -28,6 +28,7 @@ from app.schemas.settings import (
     SystemLogListResponse,
 )
 from app.services.logging import logging_service
+from app.services.line_bot import line_bot_service
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -52,7 +53,7 @@ async def get_line_bot_settings(
         resource_id="current",
         ip_address=await logging_service.get_request_ip(request)
     )
-    
+
     # 獲取設定
     query = select(LineBotSettings).order_by(LineBotSettings.id.desc()).limit(1)
     result = await db.execute(query)
@@ -66,7 +67,7 @@ async def get_line_bot_settings(
             user_id=current_user.id,
             ip_address=await logging_service.get_request_ip(request)
         )
-        
+
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
@@ -81,9 +82,8 @@ async def get_line_bot_settings(
     return {
         "success": True,
         "data": {
-            "webhookUrl": settings.webhook_url,
             "channelAccessToken": "encrypted_token_placeholder",  # 為安全起見不返回實際令牌
-            "channelSecret": "encrypted_secret_placeholder",      # 為安全起見不返回實際密鑰
+            "targetId": settings.target_id,
             "notificationTemplates": {
                 "buildingManagerRequest": settings.building_request_template,
                 "allocationComplete": settings.allocation_complete_template,
@@ -109,22 +109,21 @@ async def update_line_bot_settings(
 
     # 準備日誌詳情，移除敏感資訊
     log_details = {
-        "webhookUrl": settings_in.webhookUrl,
+        "targetId": settings_in.targetId,
         "templates_updated": True,
         "is_new_record": existing_settings is None
     }
 
     if existing_settings:
         # 更新現有設定
-        existing_settings.webhook_url = settings_in.webhookUrl
         existing_settings.channel_access_token = settings_in.channelAccessToken
-        existing_settings.channel_secret = settings_in.channelSecret
+        existing_settings.target_id = settings_in.targetId
         existing_settings.building_request_template = settings_in.notificationTemplates.buildingManagerRequest
         existing_settings.allocation_complete_template = settings_in.notificationTemplates.allocationComplete
         existing_settings.updated_at = datetime.utcnow()
         existing_settings.updated_by = current_user.id
         db.add(existing_settings)
-        
+
         # 記錄更新操作
         await logging_service.audit(
             db,
@@ -139,15 +138,14 @@ async def update_line_bot_settings(
     else:
         # 創建新設定
         new_settings = LineBotSettings(
-            webhook_url=settings_in.webhookUrl,
             channel_access_token=settings_in.channelAccessToken,
-            channel_secret=settings_in.channelSecret,
+            target_id=settings_in.targetId,
             building_request_template=settings_in.notificationTemplates.buildingManagerRequest,
             allocation_complete_template=settings_in.notificationTemplates.allocationComplete,
             updated_by=current_user.id,
         )
         db.add(new_settings)
-        
+
         # 記錄創建操作
         await logging_service.audit(
             db,
@@ -187,7 +185,7 @@ async def test_line_bot(
         user_id=current_user.id,
         ip_address=await logging_service.get_request_ip(request)
     )
-    
+
     # 獲取設定
     query = select(LineBotSettings).order_by(LineBotSettings.id.desc()).limit(1)
     result = await db.execute(query)
@@ -201,7 +199,7 @@ async def test_line_bot(
             user_id=current_user.id,
             ip_address=await logging_service.get_request_ip(request)
         )
-        
+
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
@@ -214,13 +212,13 @@ async def test_line_bot(
         )
 
     # 在實際應用中，這裡會進行 LINE Bot API 的連接測試
-    # 此處簡化為模擬測試結果
     try:
-        # 模擬連接測試
-        # 實際應用中，會使用 LINE Bot SDK 進行 API 調用
-        # from linebot import LineBotApi
-        # line_bot_api = LineBotApi(settings.channel_access_token)
-        # bot_info = line_bot_api.get_bot_info()
+        # 發送測試訊息
+        test_message = f"這是一條測試訊息，發送時間：{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}"
+        success = await line_bot_service.send_push_message(db, test_message, settings)
+        
+        if not success:
+            raise Exception("發送測試訊息失敗")
 
         # 記錄測試成功
         await logging_service.info(
@@ -236,7 +234,7 @@ async def test_line_bot(
             "data": {
                 "connectionStatus": "success",
                 "botInfo": {
-                    "displayName": "設備借用系統通知"
+                    "targetId": settings.target_id
                 }
             }
         }
@@ -286,7 +284,7 @@ async def get_smtp_settings(
         resource_id="current",
         ip_address=await logging_service.get_request_ip(request)
     )
-    
+
     # 獲取設定
     query = select(SmtpSettings).order_by(SmtpSettings.id.desc()).limit(1)
     result = await db.execute(query)
@@ -300,7 +298,7 @@ async def get_smtp_settings(
             user_id=current_user.id,
             ip_address=await logging_service.get_request_ip(request)
         )
-        
+
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
@@ -352,7 +350,7 @@ async def update_smtp_settings(
             "body": settings_in.emailTemplates.approvalNotification.body,
         }
     })
-    
+
     # 準備日誌詳情，移除敏感資訊
     log_details = {
         "host": settings_in.host,
@@ -378,7 +376,7 @@ async def update_smtp_settings(
         existing_settings.updated_at = datetime.utcnow()
         existing_settings.updated_by = current_user.id
         db.add(existing_settings)
-        
+
         # 記錄更新操作
         await logging_service.audit(
             db,
@@ -404,7 +402,7 @@ async def update_smtp_settings(
             updated_by=current_user.id,
         )
         db.add(new_settings)
-        
+
         # 記錄創建操作
         await logging_service.audit(
             db,
@@ -445,7 +443,7 @@ async def test_smtp(
         user_id=current_user.id,
         ip_address=await logging_service.get_request_ip(request)
     )
-    
+
     # 獲取設定
     query = select(SmtpSettings).order_by(SmtpSettings.id.desc()).limit(1)
     result = await db.execute(query)
@@ -459,7 +457,7 @@ async def test_smtp(
             user_id=current_user.id,
             ip_address=await logging_service.get_request_ip(request)
         )
-        
+
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
@@ -543,7 +541,7 @@ async def get_system_parameters(
         resource_id="current",
         ip_address=await logging_service.get_request_ip(request)
     )
-    
+
     # 獲取設定
     query = select(SystemParameters).order_by(SystemParameters.id.desc()).limit(1)
     result = await db.execute(query)
@@ -558,7 +556,7 @@ async def get_system_parameters(
             user_id=current_user.id,
             ip_address=await logging_service.get_request_ip(request)
         )
-        
+
         return {
             "success": True,
             "data": {
@@ -604,7 +602,7 @@ async def update_system_parameters(
     existing_settings = result.scalars().first()
 
     params = request_data.parameters
-    
+
     # 準備日誌詳情
     log_details = {
         "requestExpiryDays": params.requestExpiryDays,
@@ -619,7 +617,7 @@ async def update_system_parameters(
     if existing_settings:
         # 檢查是否啟用了維護模式
         maintenance_mode_changed = existing_settings.system_maintenance_mode != params.systemMaintenanceMode
-        
+
         # 更新現有設定
         existing_settings.request_expiry_days = params.requestExpiryDays
         existing_settings.response_form_validity_hours = params.responseFormValidityHours
@@ -630,7 +628,7 @@ async def update_system_parameters(
         existing_settings.updated_at = datetime.utcnow()
         existing_settings.updated_by = current_user.id
         db.add(existing_settings)
-        
+
         # 記錄更新操作
         await logging_service.audit(
             db,
@@ -642,7 +640,7 @@ async def update_system_parameters(
             details=log_details,
             ip_address=await logging_service.get_request_ip(request)
         )
-        
+
         # 如果維護模式狀態變更，記錄特殊日誌
         if maintenance_mode_changed:
             status_msg = "啟用" if params.systemMaintenanceMode else "停用"
@@ -665,7 +663,7 @@ async def update_system_parameters(
             updated_by=current_user.id,
         )
         db.add(new_settings)
-        
+
         # 記錄創建操作
         await logging_service.audit(
             db,
@@ -677,7 +675,7 @@ async def update_system_parameters(
             details=log_details,
             ip_address=await logging_service.get_request_ip(request)
         )
-        
+
         # 如果維護模式被啟用，記錄特殊日誌
         if params.systemMaintenanceMode:
             await logging_service.info(
@@ -718,7 +716,7 @@ async def check_system_status(
         resource_id="current",
         ip_address=await logging_service.get_request_ip(request)
     )
-    
+
     # 在實際應用中，這裡會進行各組件的狀態檢查
     # 此處簡化為模擬結果
 
@@ -733,7 +731,7 @@ async def check_system_status(
     except Exception as e:
         db_status = "error"
         db_response_time = None
-        
+
         # 記錄資料庫錯誤
         await logging_service.error(
             db,
@@ -791,7 +789,7 @@ async def check_system_status(
     # 檢查 SSO 集成
     # 此處簡化為假設 SSO 正常運作
     sso_status = "healthy"
-    
+
     # 記錄系統狀態檢查結果
     status_summary = {
         "database": db_status,
@@ -912,9 +910,16 @@ async def get_system_logs(
 
     # 構建回應數據
     log_list = []
+    import json
     for log in logs:
-        import json
-        details = json.loads(log.details) if log.details else None
+        # 添加錯誤處理以防止 JSON 解析錯誤
+        details = None
+        if log.details:
+            try:
+                details = json.loads(log.details)
+            except json.JSONDecodeError:
+                # 如果 JSON 解析失敗，則以原始文本形式返回
+                details = {"raw_content": log.details}
 
         log_list.append({
             "id": log.id,

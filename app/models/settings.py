@@ -6,15 +6,13 @@ from sqlalchemy.orm import relationship
 
 from app.database import Base
 
-
 class LineBotSettings(Base):
     """LINE Bot設定模型，對應資料庫 line_bot_settings 資料表"""
     __tablename__ = "line_bot_settings"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    webhook_url = Column(String(255), nullable=False)
     channel_access_token = Column(String(255), nullable=False)
-    channel_secret = Column(String(255), nullable=False)
+    target_id = Column(String(100), nullable=False)  # 目標用戶或群組ID
     building_request_template = Column(Text, nullable=False)
     allocation_complete_template = Column(Text, nullable=False)
     updated_at = Column(
@@ -27,7 +25,6 @@ class LineBotSettings(Base):
 
     def __repr__(self) -> str:
         return f"<LineBotSettings {self.id}>"
-
 
 class SmtpSettings(Base):
     """SMTP設定模型，對應資料庫 smtp_settings 資料表"""
