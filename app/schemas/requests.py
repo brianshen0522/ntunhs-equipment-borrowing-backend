@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import List, Optional, Dict, Any
 
 from pydantic import BaseModel, Field, field_validator
@@ -24,6 +24,14 @@ class RequestBase(BaseModel):
     def end_date_must_be_after_start_date(cls, v, values):
         if "startDate" in values.data and v < values.data["startDate"]:
             raise ValueError("結束日期必須在開始日期之後或相同")
+        return v
+    
+    @field_validator("startDate")
+    def start_date_must_be_at_least_two_days_from_now(cls, v):
+        # 計算至少兩天後的日期
+        min_date = date.today() + timedelta(days=2)
+        if v < min_date:
+            raise ValueError(f"開始日期必須至少提前兩天申請 (不早於 {min_date.isoformat()})")
         return v
 
 

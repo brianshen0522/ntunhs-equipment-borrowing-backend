@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, update
+from sqlalchemy import select, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_system_admin_user
@@ -579,6 +579,7 @@ async def get_system_logs(
     end_date: Optional[datetime] = None,
     level: Optional[str] = None,
     component: Optional[str] = None,
+    user_id: Optional[str] = None,  # Add this parameter
     current_user: User = Depends(get_system_admin_user),
     db: AsyncSession = Depends(get_db),
 ) -> Any:
@@ -587,45 +588,48 @@ async def get_system_logs(
     """
     # 構建查詢條件
     conditions = []
-    
+
     if start_date:
         conditions.append(SystemLog.timestamp >= start_date)
-    
+
     if end_date:
         conditions.append(SystemLog.timestamp <= end_date)
-    
+
     if level:
         conditions.append(SystemLog.level == level)
-    
+
     if component:
         conditions.append(SystemLog.component == component)
-    
+
+    if user_id:  # Add this condition
+        conditions.append(SystemLog.user_id == user_id)
+
     # 計算總數
     count_query = select(func.count(SystemLog.id))
     if conditions:
         from sqlalchemy import and_
         count_query = count_query.where(and_(*conditions))
-    
+
     count_result = await db.execute(count_query)
     total = count_result.scalar()
-    
+
     # 獲取日誌
     query = select(SystemLog).order_by(SystemLog.timestamp.desc())
     if conditions:
         from sqlalchemy import and_
         query = query.where(and_(*conditions))
-    
+
     # 分頁
     query = query.offset((params.page - 1) * params.limit).limit(params.limit)
     result = await db.execute(query)
     logs = result.scalars().all()
-    
+
     # 構建回應數據
     log_list = []
     for log in logs:
         import json
         details = json.loads(log.details) if log.details else None
-        
+
         log_list.append({
             "id": log.id,
             "timestamp": log.timestamp,
@@ -633,8 +637,9 @@ async def get_system_logs(
             "component": log.component,
             "message": log.message,
             "details": details,
+            "userId": log.user_id,  # Add this to include the user ID in the response
         })
-    
+
     return {
         "success": True,
         "data": {
