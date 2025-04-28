@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy import select, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +27,7 @@ from app.schemas.settings import (
     LogListParams,
     SystemLogListResponse,
 )
+from app.services.logging import logging_service
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -34,18 +35,38 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 # LINE Bot 設定
 @router.get("/line-bot-settings", response_model=LineBotSettingsResponse)
 async def get_line_bot_settings(
+    request: Request,
     current_user: User = Depends(get_system_admin_user),
     db: AsyncSession = Depends(get_db),
 ) -> Any:
     """
     獲取當前 LINE Bot 設定
     """
+    # 記錄查詢操作
+    await logging_service.audit(
+        db,
+        component="admin",
+        action="read",
+        user_id=current_user.id,
+        resource_type="line_bot_settings",
+        resource_id="current",
+        ip_address=await logging_service.get_request_ip(request)
+    )
+    
     # 獲取設定
     query = select(LineBotSettings).order_by(LineBotSettings.id.desc()).limit(1)
     result = await db.execute(query)
     settings = result.scalars().first()
-    
+
     if not settings:
+        await logging_service.warning(
+            db,
+            component="admin",
+            message="LINE Bot 設定尚未建立",
+            user_id=current_user.id,
+            ip_address=await logging_service.get_request_ip(request)
+        )
+        
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
@@ -56,7 +77,7 @@ async def get_line_bot_settings(
                 }
             }
         )
-    
+
     return {
         "success": True,
         "data": {
@@ -73,6 +94,7 @@ async def get_line_bot_settings(
 
 @router.put("/line-bot-settings", response_model=LineBotSettingsUpdateResponse)
 async def update_line_bot_settings(
+    request: Request,
     settings_in: LineBotSettingsSchema,
     current_user: User = Depends(get_system_admin_user),
     db: AsyncSession = Depends(get_db),
@@ -84,7 +106,14 @@ async def update_line_bot_settings(
     query = select(LineBotSettings).order_by(LineBotSettings.id.desc()).limit(1)
     result = await db.execute(query)
     existing_settings = result.scalars().first()
-    
+
+    # 準備日誌詳情，移除敏感資訊
+    log_details = {
+        "webhookUrl": settings_in.webhookUrl,
+        "templates_updated": True,
+        "is_new_record": existing_settings is None
+    }
+
     if existing_settings:
         # 更新現有設定
         existing_settings.webhook_url = settings_in.webhookUrl
@@ -95,6 +124,18 @@ async def update_line_bot_settings(
         existing_settings.updated_at = datetime.utcnow()
         existing_settings.updated_by = current_user.id
         db.add(existing_settings)
+        
+        # 記錄更新操作
+        await logging_service.audit(
+            db,
+            component="admin",
+            action="update",
+            user_id=current_user.id,
+            resource_type="line_bot_settings",
+            resource_id=str(existing_settings.id),
+            details=log_details,
+            ip_address=await logging_service.get_request_ip(request)
+        )
     else:
         # 創建新設定
         new_settings = LineBotSettings(
@@ -106,9 +147,21 @@ async def update_line_bot_settings(
             updated_by=current_user.id,
         )
         db.add(new_settings)
-    
+        
+        # 記錄創建操作
+        await logging_service.audit(
+            db,
+            component="admin",
+            action="create",
+            user_id=current_user.id,
+            resource_type="line_bot_settings",
+            resource_id="new",
+            details=log_details,
+            ip_address=await logging_service.get_request_ip(request)
+        )
+
     await db.commit()
-    
+
     return {
         "success": True,
         "data": {
@@ -119,18 +172,36 @@ async def update_line_bot_settings(
 
 @router.post("/line-bot-test", response_model=LineBotTestResponse)
 async def test_line_bot(
+    request: Request,
     current_user: User = Depends(get_system_admin_user),
     db: AsyncSession = Depends(get_db),
 ) -> Any:
     """
     測試 LINE Bot 連接是否正常
     """
+    # 記錄測試操作
+    await logging_service.info(
+        db,
+        component="admin",
+        message="LINE Bot 連接測試請求",
+        user_id=current_user.id,
+        ip_address=await logging_service.get_request_ip(request)
+    )
+    
     # 獲取設定
     query = select(LineBotSettings).order_by(LineBotSettings.id.desc()).limit(1)
     result = await db.execute(query)
     settings = result.scalars().first()
-    
+
     if not settings:
+        await logging_service.warning(
+            db,
+            component="admin",
+            message="LINE Bot 連接測試失敗：設定不存在",
+            user_id=current_user.id,
+            ip_address=await logging_service.get_request_ip(request)
+        )
+        
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
@@ -141,7 +212,7 @@ async def test_line_bot(
                 }
             }
         )
-    
+
     # 在實際應用中，這裡會進行 LINE Bot API 的連接測試
     # 此處簡化為模擬測試結果
     try:
@@ -150,17 +221,16 @@ async def test_line_bot(
         # from linebot import LineBotApi
         # line_bot_api = LineBotApi(settings.channel_access_token)
         # bot_info = line_bot_api.get_bot_info()
-        
+
         # 記錄測試成功
-        log = SystemLog(
-            level="info",
+        await logging_service.info(
+            db,
             component="line",
             message="LINE Bot 連接測試成功",
             user_id=current_user.id,
+            ip_address=await logging_service.get_request_ip(request)
         )
-        db.add(log)
-        await db.commit()
-        
+
         return {
             "success": True,
             "data": {
@@ -172,16 +242,15 @@ async def test_line_bot(
         }
     except Exception as e:
         # 記錄測試失敗
-        log = SystemLog(
-            level="error",
+        await logging_service.error(
+            db,
             component="line",
             message="LINE Bot 連接測試失敗",
             details=str(e),
             user_id=current_user.id,
+            ip_address=await logging_service.get_request_ip(request)
         )
-        db.add(log)
-        await db.commit()
-        
+
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
@@ -200,18 +269,38 @@ async def test_line_bot(
 # SMTP 設定
 @router.get("/smtp-settings", response_model=SmtpSettingsResponse)
 async def get_smtp_settings(
+    request: Request,
     current_user: User = Depends(get_system_admin_user),
     db: AsyncSession = Depends(get_db),
 ) -> Any:
     """
     獲取當前 SMTP 設定
     """
+    # 記錄查詢操作
+    await logging_service.audit(
+        db,
+        component="admin",
+        action="read",
+        user_id=current_user.id,
+        resource_type="smtp_settings",
+        resource_id="current",
+        ip_address=await logging_service.get_request_ip(request)
+    )
+    
     # 獲取設定
     query = select(SmtpSettings).order_by(SmtpSettings.id.desc()).limit(1)
     result = await db.execute(query)
     settings = result.scalars().first()
-    
+
     if not settings:
+        await logging_service.warning(
+            db,
+            component="admin",
+            message="SMTP 設定尚未建立",
+            user_id=current_user.id,
+            ip_address=await logging_service.get_request_ip(request)
+        )
+        
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
@@ -222,10 +311,10 @@ async def get_smtp_settings(
                 }
             }
         )
-    
+
     import json
     email_templates = json.loads(settings.email_templates)
-    
+
     return {
         "success": True,
         "data": {
@@ -243,6 +332,7 @@ async def get_smtp_settings(
 
 @router.put("/smtp-settings", response_model=SmtpSettingsUpdateResponse)
 async def update_smtp_settings(
+    request: Request,
     settings_in: SmtpSettingsSchema,
     current_user: User = Depends(get_system_admin_user),
     db: AsyncSession = Depends(get_db),
@@ -254,7 +344,7 @@ async def update_smtp_settings(
     query = select(SmtpSettings).order_by(SmtpSettings.id.desc()).limit(1)
     result = await db.execute(query)
     existing_settings = result.scalars().first()
-    
+
     import json
     email_templates_json = json.dumps({
         "approvalNotification": {
@@ -263,6 +353,18 @@ async def update_smtp_settings(
         }
     })
     
+    # 準備日誌詳情，移除敏感資訊
+    log_details = {
+        "host": settings_in.host,
+        "port": settings_in.port,
+        "secure": settings_in.secure,
+        "username": settings_in.username,
+        "senderEmail": settings_in.senderEmail,
+        "senderName": settings_in.senderName,
+        "templates_updated": True,
+        "is_new_record": existing_settings is None
+    }
+
     if existing_settings:
         # 更新現有設定
         existing_settings.host = settings_in.host
@@ -276,6 +378,18 @@ async def update_smtp_settings(
         existing_settings.updated_at = datetime.utcnow()
         existing_settings.updated_by = current_user.id
         db.add(existing_settings)
+        
+        # 記錄更新操作
+        await logging_service.audit(
+            db,
+            component="admin",
+            action="update",
+            user_id=current_user.id,
+            resource_type="smtp_settings",
+            resource_id=str(existing_settings.id),
+            details=log_details,
+            ip_address=await logging_service.get_request_ip(request)
+        )
     else:
         # 創建新設定
         new_settings = SmtpSettings(
@@ -290,9 +404,21 @@ async def update_smtp_settings(
             updated_by=current_user.id,
         )
         db.add(new_settings)
-    
+        
+        # 記錄創建操作
+        await logging_service.audit(
+            db,
+            component="admin",
+            action="create",
+            user_id=current_user.id,
+            resource_type="smtp_settings",
+            resource_id="new",
+            details=log_details,
+            ip_address=await logging_service.get_request_ip(request)
+        )
+
     await db.commit()
-    
+
     return {
         "success": True,
         "data": {
@@ -303,6 +429,7 @@ async def update_smtp_settings(
 
 @router.post("/smtp-test", response_model=SmtpTestResponse)
 async def test_smtp(
+    request: Request,
     test_data: SmtpTestRequest,
     current_user: User = Depends(get_system_admin_user),
     db: AsyncSession = Depends(get_db),
@@ -310,12 +437,29 @@ async def test_smtp(
     """
     測試 SMTP 連接是否正常
     """
+    # 記錄測試操作
+    await logging_service.info(
+        db,
+        component="admin",
+        message=f"SMTP 連接測試請求，目標郵箱: {test_data.testEmail}",
+        user_id=current_user.id,
+        ip_address=await logging_service.get_request_ip(request)
+    )
+    
     # 獲取設定
     query = select(SmtpSettings).order_by(SmtpSettings.id.desc()).limit(1)
     result = await db.execute(query)
     settings = result.scalars().first()
-    
+
     if not settings:
+        await logging_service.warning(
+            db,
+            component="admin",
+            message="SMTP 連接測試失敗：設定不存在",
+            user_id=current_user.id,
+            ip_address=await logging_service.get_request_ip(request)
+        )
+        
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
@@ -326,7 +470,7 @@ async def test_smtp(
                 }
             }
         )
-    
+
     # 在實際應用中，這裡會進行 SMTP 連接和郵件發送測試
     # 此處簡化為模擬測試結果
     try:
@@ -335,17 +479,16 @@ async def test_smtp(
         # import smtplib
         # from email.mime.text import MIMEText
         # from email.mime.multipart import MIMEMultipart
-        
+
         # 記錄測試成功
-        log = SystemLog(
-            level="info",
+        await logging_service.info(
+            db,
             component="email",
             message=f"SMTP 連接測試成功，發送郵件至 {test_data.testEmail}",
             user_id=current_user.id,
+            ip_address=await logging_service.get_request_ip(request)
         )
-        db.add(log)
-        await db.commit()
-        
+
         return {
             "success": True,
             "data": {
@@ -356,16 +499,15 @@ async def test_smtp(
         }
     except Exception as e:
         # 記錄測試失敗
-        log = SystemLog(
-            level="error",
+        await logging_service.error(
+            db,
             component="email",
             message="SMTP 連接測試失敗",
             details=str(e),
             user_id=current_user.id,
+            ip_address=await logging_service.get_request_ip(request)
         )
-        db.add(log)
-        await db.commit()
-        
+
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
@@ -384,19 +526,39 @@ async def test_smtp(
 # 系統參數
 @router.get("/system-parameters", response_model=SystemParametersResponse)
 async def get_system_parameters(
+    request: Request,
     current_user: User = Depends(get_system_admin_user),
     db: AsyncSession = Depends(get_db),
 ) -> Any:
     """
     獲取全域系統參數設定
     """
+    # 記錄查詢操作
+    await logging_service.audit(
+        db,
+        component="admin",
+        action="read",
+        user_id=current_user.id,
+        resource_type="system_parameters",
+        resource_id="current",
+        ip_address=await logging_service.get_request_ip(request)
+    )
+    
     # 獲取設定
     query = select(SystemParameters).order_by(SystemParameters.id.desc()).limit(1)
     result = await db.execute(query)
     settings = result.scalars().first()
-    
+
     if not settings:
         # 返回默認參數
+        await logging_service.info(
+            db,
+            component="admin",
+            message="系統參數尚未建立，返回默認值",
+            user_id=current_user.id,
+            ip_address=await logging_service.get_request_ip(request)
+        )
+        
         return {
             "success": True,
             "data": {
@@ -410,7 +572,7 @@ async def get_system_parameters(
                 }
             }
         }
-    
+
     return {
         "success": True,
         "data": {
@@ -428,7 +590,8 @@ async def get_system_parameters(
 
 @router.put("/system-parameters", response_model=SystemParametersUpdateResponse)
 async def update_system_parameters(
-    request: SystemParametersRequest,
+    request: Request,
+    request_data: SystemParametersRequest,
     current_user: User = Depends(get_system_admin_user),
     db: AsyncSession = Depends(get_db),
 ) -> Any:
@@ -439,10 +602,24 @@ async def update_system_parameters(
     query = select(SystemParameters).order_by(SystemParameters.id.desc()).limit(1)
     result = await db.execute(query)
     existing_settings = result.scalars().first()
+
+    params = request_data.parameters
     
-    params = request.parameters
-    
+    # 準備日誌詳情
+    log_details = {
+        "requestExpiryDays": params.requestExpiryDays,
+        "responseFormValidityHours": params.responseFormValidityHours,
+        "maxItemsPerRequest": params.maxItemsPerRequest,
+        "enableEmailNotifications": params.enableEmailNotifications,
+        "enableLineNotifications": params.enableLineNotifications,
+        "systemMaintenanceMode": params.systemMaintenanceMode,
+        "is_new_record": existing_settings is None
+    }
+
     if existing_settings:
+        # 檢查是否啟用了維護模式
+        maintenance_mode_changed = existing_settings.system_maintenance_mode != params.systemMaintenanceMode
+        
         # 更新現有設定
         existing_settings.request_expiry_days = params.requestExpiryDays
         existing_settings.response_form_validity_hours = params.responseFormValidityHours
@@ -453,6 +630,29 @@ async def update_system_parameters(
         existing_settings.updated_at = datetime.utcnow()
         existing_settings.updated_by = current_user.id
         db.add(existing_settings)
+        
+        # 記錄更新操作
+        await logging_service.audit(
+            db,
+            component="admin",
+            action="update",
+            user_id=current_user.id,
+            resource_type="system_parameters",
+            resource_id=str(existing_settings.id),
+            details=log_details,
+            ip_address=await logging_service.get_request_ip(request)
+        )
+        
+        # 如果維護模式狀態變更，記錄特殊日誌
+        if maintenance_mode_changed:
+            status_msg = "啟用" if params.systemMaintenanceMode else "停用"
+            await logging_service.info(
+                db,
+                component="system",
+                message=f"系統維護模式已{status_msg}",
+                user_id=current_user.id,
+                ip_address=await logging_service.get_request_ip(request)
+            )
     else:
         # 創建新設定
         new_settings = SystemParameters(
@@ -465,9 +665,31 @@ async def update_system_parameters(
             updated_by=current_user.id,
         )
         db.add(new_settings)
-    
+        
+        # 記錄創建操作
+        await logging_service.audit(
+            db,
+            component="admin",
+            action="create",
+            user_id=current_user.id,
+            resource_type="system_parameters",
+            resource_id="new",
+            details=log_details,
+            ip_address=await logging_service.get_request_ip(request)
+        )
+        
+        # 如果維護模式被啟用，記錄特殊日誌
+        if params.systemMaintenanceMode:
+            await logging_service.info(
+                db,
+                component="system",
+                message="系統維護模式已啟用",
+                user_id=current_user.id,
+                ip_address=await logging_service.get_request_ip(request)
+            )
+
     await db.commit()
-    
+
     return {
         "success": True,
         "data": {
@@ -479,25 +701,49 @@ async def update_system_parameters(
 # 系統狀態
 @router.get("/system-status", response_model=SystemStatusResponse)
 async def check_system_status(
+    request: Request,
     current_user: User = Depends(get_system_admin_user),
     db: AsyncSession = Depends(get_db),
 ) -> Any:
     """
     檢查系統各組件運行狀態
     """
+    # 記錄查詢操作
+    await logging_service.audit(
+        db,
+        component="admin",
+        action="read",
+        user_id=current_user.id,
+        resource_type="system_status",
+        resource_id="current",
+        ip_address=await logging_service.get_request_ip(request)
+    )
+    
     # 在實際應用中，這裡會進行各組件的狀態檢查
     # 此處簡化為模擬結果
-    
+
     # 檢查資料庫連接
     try:
         # 簡單的資料庫查詢以檢查連接
+        start_time = datetime.utcnow()
         await db.execute(select(func.now()))
+        end_time = datetime.utcnow()
         db_status = "healthy"
-        db_response_time = 45  # 模擬響應時間
-    except Exception:
+        db_response_time = int((end_time - start_time).total_seconds() * 1000)  # 轉換為毫秒
+    except Exception as e:
         db_status = "error"
         db_response_time = None
-    
+        
+        # 記錄資料庫錯誤
+        await logging_service.error(
+            db,
+            component="database",
+            message="資料庫連接檢查失敗",
+            details=str(e),
+            user_id=current_user.id,
+            ip_address=await logging_service.get_request_ip(request)
+        )
+
     # 獲取最後的 LINE 和郵件記錄
     line_webhook_query = (
         select(SystemLog.timestamp)
@@ -507,7 +753,7 @@ async def check_system_status(
     )
     line_result = await db.execute(line_webhook_query)
     last_line_webhook = line_result.scalar()
-    
+
     email_query = (
         select(SystemLog.timestamp)
         .where((SystemLog.component == "email") & (SystemLog.level == "info"))
@@ -516,7 +762,7 @@ async def check_system_status(
     )
     email_result = await db.execute(email_query)
     last_email_sent = email_result.scalar()
-    
+
     auth_query = (
         select(SystemLog.timestamp)
         .where((SystemLog.component == "auth") & (SystemLog.level == "info"))
@@ -525,27 +771,43 @@ async def check_system_status(
     )
     auth_result = await db.execute(auth_query)
     last_auth = auth_result.scalar()
-    
+
     # 檢查 LINE Bot 設定
     line_settings_query = select(LineBotSettings).order_by(LineBotSettings.id.desc()).limit(1)
     line_settings_result = await db.execute(line_settings_query)
     line_settings = line_settings_result.scalars().first()
-    
+
     line_status = "healthy" if line_settings else "warning"
     line_error = None if line_settings else "LINE Bot 尚未設定"
-    
+
     # 檢查 SMTP 設定
     smtp_settings_query = select(SmtpSettings).order_by(SmtpSettings.id.desc()).limit(1)
     smtp_settings_result = await db.execute(smtp_settings_query)
     smtp_settings = smtp_settings_result.scalars().first()
-    
+
     email_status = "healthy" if smtp_settings else "warning"
     email_error = None if smtp_settings else "SMTP 尚未設定"
-    
+
     # 檢查 SSO 集成
     # 此處簡化為假設 SSO 正常運作
     sso_status = "healthy"
     
+    # 記錄系統狀態檢查結果
+    status_summary = {
+        "database": db_status,
+        "lineBot": line_status,
+        "emailService": email_status,
+        "ssoIntegration": sso_status
+    }
+    await logging_service.info(
+        db,
+        component="system",
+        message="系統狀態檢查完成",
+        details=status_summary,
+        user_id=current_user.id,
+        ip_address=await logging_service.get_request_ip(request)
+    )
+
     return {
         "success": True,
         "data": {
@@ -574,18 +836,41 @@ async def check_system_status(
 # 系統日誌
 @router.get("/system-logs", response_model=SystemLogListResponse)
 async def get_system_logs(
+    request: Request,
     params: LogListParams = Depends(),
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
     level: Optional[str] = None,
     component: Optional[str] = None,
-    user_id: Optional[str] = None,  # Add this parameter
+    user_id: Optional[str] = None,
     current_user: User = Depends(get_system_admin_user),
     db: AsyncSession = Depends(get_db),
 ) -> Any:
     """
     查詢系統日誌記錄
     """
+    # 記錄查詢操作
+    await logging_service.audit(
+        db,
+        component="admin",
+        action="read",
+        user_id=current_user.id,
+        resource_type="system_logs",
+        resource_id="list",
+        details={
+            "page": params.page,
+            "limit": params.limit,
+            "filters": {
+                "start_date": start_date.isoformat() if start_date else None,
+                "end_date": end_date.isoformat() if end_date else None,
+                "level": level,
+                "component": component,
+                "user_id": user_id
+            }
+        },
+        ip_address=await logging_service.get_request_ip(request)
+    )
+
     # 構建查詢條件
     conditions = []
 
@@ -601,8 +886,9 @@ async def get_system_logs(
     if component:
         conditions.append(SystemLog.component == component)
 
-    if user_id:  # Add this condition
-        conditions.append(SystemLog.user_id == user_id)
+    if user_id:
+        # 修改為使用 LIKE 進行模糊查詢，允許部分匹配使用者 ID
+        conditions.append(SystemLog.user_id.ilike(f"%{user_id}%"))
 
     # 計算總數
     count_query = select(func.count(SystemLog.id))
@@ -637,7 +923,8 @@ async def get_system_logs(
             "component": log.component,
             "message": log.message,
             "details": details,
-            "userId": log.user_id,  # Add this to include the user ID in the response
+            "userId": log.user_id,
+            "ipAddress": log.ip_address,  # 添加 IP 地址到回應中
         })
 
     return {

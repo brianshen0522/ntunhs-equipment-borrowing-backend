@@ -221,7 +221,8 @@ class SystemLogItem(BaseModel):
     component: str = Field(..., description="系統組件")
     message: str = Field(..., description="日誌訊息")
     details: Optional[Dict[str, Any]] = Field(None, description="詳細資訊")
-
+    userId: Optional[str] = Field(None, description="使用者ID")
+    ipAddress: Optional[str] = Field(None, description="IP地址")
 
 class SystemLogListResponse(ResponseBase):
     data: dict = Field(
@@ -241,6 +242,8 @@ class SystemLogListResponse(ResponseBase):
                         "userId": "user123",
                         "requestId": "req_123456",
                     },
+                    "userId": "user123",
+                    "ipAddress": "192.168.1.100"
                 }
             ],
         },
