@@ -18,7 +18,6 @@ from app.services.logging import logging_service
 
 router = APIRouter(prefix="/admin/users", tags=["admin"])
 
-
 @router.get("", response_model=UserListResponse)
 async def get_users_list(
     request: Request,
@@ -27,7 +26,7 @@ async def get_users_list(
     db: AsyncSession = Depends(get_db),
 ) -> Any:
     """
-    獲取系統管理員和教務處人員列表
+    獲取系統使用者列表（不限角色）
     """
     # 記錄查詢操作
     await logging_service.audit(
@@ -40,11 +39,11 @@ async def get_users_list(
         details={"params": params.model_dump(), "filters": {"role": params.role, "query": params.query}},
         ip_address=await logging_service.get_request_ip(request)
     )
-    
+
     # 構建查詢條件
     conditions = []
 
-    # 角色過濾
+    # 角色過濾 - 修改此部分以支援所有用戶
     if params.role:
         # 子查詢獲取特定角色的用戶ID
         role_subquery = (
@@ -54,15 +53,7 @@ async def get_users_list(
             .scalar_subquery()
         )
         conditions.append(User.id.in_(role_subquery))
-    else:
-        # 子查詢獲取所有有管理角色的用戶ID
-        role_subquery = (
-            select(UserRole.user_id)
-            .where(UserRole.role.in_(["academic_staff", "system_admin"]))
-            .distinct()
-            .scalar_subquery()
-        )
-        conditions.append(User.id.in_(role_subquery))
+    # 移除此處的預設過濾，允許顯示所有使用者
 
     # 搜尋關鍵字
     if params.query:
@@ -123,7 +114,6 @@ async def get_users_list(
             "users": user_list,
         }
     }
-
 
 @router.post("/{user_id}/roles", response_model=UserRoleResponse)
 async def manage_user_roles(
