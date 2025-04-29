@@ -25,11 +25,10 @@ from app.services.logging import logging_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-
 @router.post("/login", response_model=LoginResponse)
 async def login(
     request: Request,
-    login_data: LoginRequest, 
+    login_data: LoginRequest,
     db: AsyncSession = Depends(get_db)
 ) -> Any:
     """
@@ -43,7 +42,7 @@ async def login(
         details={"username": login_data.username},
         ip_address=await logging_service.get_request_ip(request)
     )
-    
+
     # 驗證學校系統憑證
     sso_user = await verify_ntunhs_credentials(login_data.username, login_data.password, db)
     if not sso_user:
@@ -55,7 +54,7 @@ async def login(
             details={"username": login_data.username, "reason": "invalid_credentials"},
             ip_address=await logging_service.get_request_ip(request)
         )
-        
+
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="帳號或密碼錯誤",
@@ -76,7 +75,7 @@ async def login(
     # 如果有多個角色但未選擇，返回角色選擇
     if len(user_roles) > 1 and login_data.selectedRole is None:
         token = await create_access_token(user.id, "applicant")  # 默認使用 applicant 角色
-        
+
         # 記錄登入成功，需要選擇角色
         await logging_service.info(
             db,
@@ -90,7 +89,7 @@ async def login(
             user_id=user.id,
             ip_address=await logging_service.get_request_ip(request)
         )
-        
+
         return LoginResponse(
             data={
                 "token": token,
@@ -116,7 +115,7 @@ async def login(
                 user_id=user.id,
                 ip_address=await logging_service.get_request_ip(request)
             )
-            
+
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="使用者沒有所選角色的權限",
@@ -132,7 +131,7 @@ async def login(
     # 更新最後登入時間
     user.last_login = datetime.utcnow()
     await db.commit()
-    
+
     # 記錄登入成功
     await logging_service.audit(
         db,
@@ -149,8 +148,8 @@ async def login(
         ip_address=await logging_service.get_request_ip(request)
     )
 
-    return LoginResponse(data={"token": token, "role": role})
-
+    # 修改這裡: 明確設定 needRoleSelection=False 
+    return LoginResponse(data={"token": token, "role": role, "needRoleSelection": False})
 
 @router.post("/logout", response_model=SimpleResponse)
 async def logout(

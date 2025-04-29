@@ -152,6 +152,14 @@ async def get_request_detail(
             }
         )
 
+    # 如果申請已完成，獲取更詳細的分配信息
+    if request_detail["status"] == "completed":
+        # 使用allocation的詳細摘要方法
+        allocation_summary = await crud_allocation.get_allocation_summary(db, request_id=request_id)
+        if allocation_summary and "items" in allocation_summary:
+            # 用更詳細的items替換原來的items
+            request_detail["items"] = allocation_summary["items"]
+
     return {
         "success": True,
         "data": request_detail,

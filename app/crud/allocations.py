@@ -146,9 +146,10 @@ class CRUDAllocation(CRUDBase[Allocation, AllocationCreate, Any]):
         
         return email
 
+
     async def get_allocation_summary(self, db: AsyncSession, *, request_id: str) -> Optional[Dict[str, Any]]:
         """獲取分配摘要"""
-        # 檢查申請是否存在且狀態為已完成
+        # 檢查申請是否存在
         query = (
             select(Request, User.username)
             .join(User, Request.user_id == User.id)
@@ -156,12 +157,12 @@ class CRUDAllocation(CRUDBase[Allocation, AllocationCreate, Any]):
         )
         result = await db.execute(query)
         request_result = result.first()
-        
+
         if not request_result:
             return None
-        
+
         request, username = request_result
-        
+
         # 獲取申請項目和分配
         items_query = (
             select(
@@ -179,12 +180,12 @@ class CRUDAllocation(CRUDBase[Allocation, AllocationCreate, Any]):
             .group_by(RequestItem.id, Equipment.name)
         )
         items_result = await db.execute(items_query)
-        
+
         # 構建分配摘要
         items = []
         for item, equipment_name, allocation_ids, building_ids, building_names, allocated_quantities in items_result.all():
             allocations = []
-            
+
             # 如果有分配數據
             if allocation_ids and allocation_ids[0] is not None:
                 for i in range(len(allocation_ids)):
@@ -194,7 +195,7 @@ class CRUDAllocation(CRUDBase[Allocation, AllocationCreate, Any]):
                         "buildingName": building_names[i],
                         "allocatedQuantity": allocated_quantities[i],
                     })
-            
+
             items.append({
                 "itemId": item.id,
                 "equipmentName": equipment_name,
@@ -202,7 +203,7 @@ class CRUDAllocation(CRUDBase[Allocation, AllocationCreate, Any]):
                 "approvedQuantity": item.approved_quantity,
                 "allocations": allocations,
             })
-        
+
         return {
             "requestId": request.id,
             "status": request.status,
@@ -216,6 +217,5 @@ class CRUDAllocation(CRUDBase[Allocation, AllocationCreate, Any]):
             "notes": request.notes,
             "items": items,
         }
-
 
 allocation = CRUDAllocation(Allocation)
