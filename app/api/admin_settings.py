@@ -569,6 +569,7 @@ async def get_system_parameters(
                     "enableEmailNotifications": True,
                     "enableLineNotifications": True,
                     "systemMaintenanceMode": False,
+                    "systemUrl": None,
                 }
             }
         }
@@ -583,10 +584,123 @@ async def get_system_parameters(
                 "enableEmailNotifications": settings.enable_email_notifications,
                 "enableLineNotifications": settings.enable_line_notifications,
                 "systemMaintenanceMode": settings.system_maintenance_mode,
+                "systemUrl": settings.system_url,
             }
         }
     }
 
+
+@router.put("/system-parameters", response_model=SystemParametersUpdateResponse)
+async def update_system_parameters(
+    request: Request,
+    request_data: SystemParametersRequest,
+    current_user: User = Depends(get_system_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    """
+    更新全域系統參數
+    """
+    # 獲取現有設定
+    query = select(SystemParameters).order_by(SystemParameters.id.desc()).limit(1)
+    result = await db.execute(query)
+    existing_settings = result.scalars().first()
+
+    params = request_data.parameters
+
+    # 準備日誌詳情
+    log_details = {
+        "requestExpiryDays": params.requestExpiryDays,
+        "responseFormValidityHours": params.responseFormValidityHours,
+        "maxItemsPerRequest": params.maxItemsPerRequest,
+        "enableEmailNotifications": params.enableEmailNotifications,
+        "enableLineNotifications": params.enableLineNotifications,
+        "systemMaintenanceMode": params.systemMaintenanceMode,
+        "systemUrl": params.systemUrl,
+        "is_new_record": existing_settings is None
+    }
+
+    if existing_settings:
+        # 檢查是否啟用了維護模式
+        maintenance_mode_changed = existing_settings.system_maintenance_mode != params.systemMaintenanceMode
+
+        # 更新現有設定
+        existing_settings.request_expiry_days = params.requestExpiryDays
+        existing_settings.response_form_validity_hours = params.responseFormValidityHours
+        existing_settings.max_items_per_request = params.maxItemsPerRequest
+        existing_settings.enable_email_notifications = params.enableEmailNotifications
+        existing_settings.enable_line_notifications = params.enableLineNotifications
+        existing_settings.system_maintenance_mode = params.systemMaintenanceMode
+        existing_settings.system_url = params.systemUrl  # 新增系統URL更新
+        existing_settings.updated_at = datetime.utcnow()
+        existing_settings.updated_by = current_user.id
+        db.add(existing_settings)
+
+        # 記錄更新操作
+        await logging_service.audit(
+            db,
+            component="admin",
+            action="update",
+            user_id=current_user.id,
+            resource_type="system_parameters",
+            resource_id=str(existing_settings.id),
+            details=log_details,
+            ip_address=await logging_service.get_request_ip(request)
+        )
+
+        # 如果維護模式狀態變更，記錄特殊日誌
+        if maintenance_mode_changed:
+            status_msg = "啟用" if params.systemMaintenanceMode else "停用"
+            await logging_service.info(
+                db,
+                component="system",
+                message=f"系統維護模式已{status_msg}",
+                user_id=current_user.id,
+                ip_address=await logging_service.get_request_ip(request)
+            )
+    else:
+        # 創建新設定
+        new_settings = SystemParameters(
+            request_expiry_days=params.requestExpiryDays,
+            response_form_validity_hours=params.responseFormValidityHours,
+            max_items_per_request=params.maxItemsPerRequest,
+            enable_email_notifications=params.enableEmailNotifications,
+            enable_line_notifications=params.enableLineNotifications,
+            system_maintenance_mode=params.systemMaintenanceMode,
+            system_url=params.systemUrl,  # 新增系統URL
+            updated_by=current_user.id,
+        )
+        db.add(new_settings)
+
+        # 記錄創建操作
+        await logging_service.audit(
+            db,
+            component="admin",
+            action="create",
+            user_id=current_user.id,
+            resource_type="system_parameters",
+            resource_id="new",
+            details=log_details,
+            ip_address=await logging_service.get_request_ip(request)
+        )
+
+        # 如果維護模式被啟用，記錄特殊日誌
+        if params.systemMaintenanceMode:
+            await logging_service.info(
+                db,
+                component="system",
+                message="系統維護模式已啟用",
+                user_id=current_user.id,
+                ip_address=await logging_service.get_request_ip(request)
+            )
+
+    await db.commit()
+
+    return {
+        "success": True,
+        "data": {
+            "updated": True
+        }
+    }
 
 @router.put("/system-parameters", response_model=SystemParametersUpdateResponse)
 async def update_system_parameters(

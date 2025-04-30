@@ -1,12 +1,17 @@
 import json
 import httpx
+from datetime import date, datetime
 from typing import Dict, List, Optional, Any
 
-from sqlalchemy import select
+from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.settings import LineBotSettings
 from app.models.settings import SystemLog
+from app.models.requests import Request, RequestItem
+from app.models.allocations import Allocation
+from app.models.buildings import Building
+from app.models.equipment import Equipment
 
 class LineBotService:
     """
@@ -187,8 +192,64 @@ class LineBotService:
         return await cls.send_push_message(db, message, settings)
 
     @classmethod
+    async def get_allocation_details(cls, db: AsyncSession, request_id: str, building_id: str) -> Dict[str, Any]:
+        """
+        獲取分配詳情
+
+        Args:
+            db: 資料庫連接
+            request_id: 申請ID
+            building_id: 大樓ID
+
+        Returns:
+            Dict: 包含日期和分配詳情的字典
+        """
+        # 獲取申請信息（日期）
+        request_query = select(Request).where(Request.id == request_id)
+        request_result = await db.execute(request_query)
+        request = request_result.scalars().first()
+        
+        if not request:
+            return {"dates": "日期未知", "detail": "無詳細分配資訊"}
+        
+        # 格式化日期範圍
+        date_format = "%Y-%m-%d"
+        date_range = f"{request.start_date.strftime(date_format)} 至 {request.end_date.strftime(date_format)}"
+        
+        # 獲取特定大樓的分配資訊
+        allocations_query = (
+            select(
+                Allocation,
+                RequestItem,
+                Equipment.name.label("equipment_name")
+            )
+            .join(RequestItem, Allocation.request_item_id == RequestItem.id)
+            .join(Equipment, RequestItem.equipment_id == Equipment.id)
+            .where(
+                and_(
+                    RequestItem.request_id == request_id,
+                    Allocation.building_id == building_id,
+                    Allocation.allocated_quantity > 0
+                )
+            )
+        )
+        allocations_result = await db.execute(allocations_query)
+        
+        # 構建分配詳情字符串
+        details = []
+        for allocation, request_item, equipment_name in allocations_result:
+            details.append(f"{equipment_name}: {allocation.allocated_quantity} 件")
+        
+        allocation_detail = "\n".join(details) if details else "無分配器材"
+        
+        return {
+            "dates": date_range,
+            "detail": allocation_detail
+        }
+
+    @classmethod
     async def send_allocation_complete_notification(
-        cls, db: AsyncSession, request_id: str, building_name: str
+        cls, db: AsyncSession, request_id: str, building_id: str
     ) -> bool:
         """
         發送分配完成通知
@@ -196,7 +257,7 @@ class LineBotService:
         Args:
             db: 資料庫連接
             request_id: 申請ID
-            building_name: 大樓名稱
+            building_id: 大樓ID
 
         Returns:
             bool: 是否發送成功
@@ -208,14 +269,38 @@ class LineBotService:
                 level="error",
                 component="line",
                 message=f"LINE Bot 設定不存在，無法發送分配完成通知",
-                details=json.dumps({"requestId": request_id, "buildingName": building_name}),
+                details=json.dumps({"requestId": request_id, "buildingId": building_id}),
             )
             db.add(log)
             await db.commit()
             return False
-
+            
+        # 獲取大樓名稱
+        building_query = select(Building).where(Building.id == building_id)
+        building_result = await db.execute(building_query)
+        building = building_result.scalars().first()
+        
+        if not building:
+            # 記錄錯誤
+            log = SystemLog(
+                level="error",
+                component="line",
+                message=f"找不到大樓資訊，無法發送分配完成通知",
+                details=json.dumps({"requestId": request_id, "buildingId": building_id}),
+            )
+            db.add(log)
+            await db.commit()
+            return False
+            
+        # 獲取分配詳情
+        allocation_details = await cls.get_allocation_details(db, request_id, building_id)
+        
         # 準備訊息
-        message = settings.allocation_complete_template.replace("{{buildingName}}", building_name).replace("{{requestId}}", request_id)
+        message = settings.allocation_complete_template
+        message = message.replace("{{buildingName}}", building.name)
+        message = message.replace("{{requestId}}", request_id)
+        message = message.replace("{{dates}}", allocation_details["dates"])
+        message = message.replace("{{detail}}", allocation_details["detail"])
 
         # 記錄發送嘗試
         log = SystemLog(
@@ -224,7 +309,8 @@ class LineBotService:
             message=f"嘗試發送分配完成通知",
             details=json.dumps({
                 "requestId": request_id, 
-                "buildingName": building_name,
+                "buildingName": building.name,
+                "allocations": allocation_details["detail"],
                 "targetId": settings.target_id
             })
         )

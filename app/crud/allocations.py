@@ -40,6 +40,9 @@ class CRUDAllocation(CRUDBase[Allocation, AllocationCreate, Any]):
 
         # 創建項目ID到物件的映射
         items_map = {item.id: item for item in items}
+        
+        # 追蹤哪些大樓收到了分配，用於後續發送LINE通知
+        allocated_buildings = set()
 
         # 為每個項目進行分配
         for allocation in obj_in.allocations:
@@ -68,6 +71,10 @@ class CRUDAllocation(CRUDBase[Allocation, AllocationCreate, Any]):
                         allocated_by=operator_id,
                     )
                     db.add(db_allocation)
+                    
+                    # 添加到分配大樓集合中
+                    if building_allocation.allocatedQuantity > 0:
+                        allocated_buildings.add(building_allocation.buildingId)
 
         # 更新申請狀態和備註
         request.status = "completed"
@@ -87,42 +94,30 @@ class CRUDAllocation(CRUDBase[Allocation, AllocationCreate, Any]):
 
         # Mark all building response tokens as finished
         await crud_response.mark_tokens_as_finished(db, request_id=request_id)
-        
+
         await db.commit()
         await db.refresh(request)
         
-        # 發送LINE通知給相關大樓管理員 - 新增的部分
+        # 分配完成後，向每個收到分配的大樓發送LINE通知
         try:
-            # 獲取所有分配的大樓
-            building_ids = set()
-            for allocation in obj_in.allocations:
-                if allocation.approvedQuantity > 0:
-                    for building_allocation in allocation.buildingAllocations:
-                        building_ids.add(building_allocation.buildingId)
-            
-            # 為每個大樓發送通知
             from app.services.line_bot import line_bot_service
-            for building_id in building_ids:
-                # 獲取大樓名稱
-                building_query = select(Building).where(Building.id == building_id)
-                building_result = await db.execute(building_query)
-                building = building_result.scalars().first()
-                
-                if building:
-                    # 發送分配完成通知
-                    await line_bot_service.send_allocation_complete_notification(
-                        db, request_id=request_id, building_name=building.name
-                    )
+            for building_id in allocated_buildings:
+                # 向每個大樓發送分配完成通知
+                await line_bot_service.send_allocation_complete_notification(
+                    db, request_id=request_id, building_id=building_id
+                )
         except Exception as e:
             # 記錄錯誤，但不中斷流程
+            from app.services.logging import logging_service
             await logging_service.error(
                 db,
                 component="line",
-                message=f"發送分配完成通知失敗",
-                details=str(e),
+                message="發送分配完成通知失敗",
+                details={"requestId": request_id, "error": str(e)},
+                user_id=operator_id,
                 request_id=request_id
             )
-        
+    
         return request
 
     async def generate_pdf(self, db: AsyncSession, *, request_id: str) -> Optional[str]:

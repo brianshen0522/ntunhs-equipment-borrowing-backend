@@ -282,7 +282,6 @@ async def reject_request(
         }
     }
 
-
 @router.post("/{request_id}/approve-inquiry", response_model=RequestApproveInquiryResponse)
 async def approve_inquiry(
     request_id: str = Path(..., description="申請ID"),
@@ -328,14 +327,50 @@ async def approve_inquiry(
     # 創建回覆令牌
     token = await crud_response.create_token(db, request_id=request_id)
     
-    # 構建填表表單URL
-    form_url = f"{request.base_url}/building-response/{token.token}" if hasattr(request, 'base_url') else f"/building-response/{token.token}"
+    # 獲取系統參數，以取得系統URL
+    from sqlalchemy import select
+    from app.models.settings import SystemParameters
     
-    # 實際發送 LINE 通知
+    params_query = select(SystemParameters).order_by(SystemParameters.id.desc()).limit(1)
+    params_result = await db.execute(params_query)
+    system_params = params_result.scalars().first()
+    
+    # 構建表單URL - 使用正確的路徑格式
+    base_url = "http://localhost:3000"  # 默認值
+    if system_params and system_params.system_url:
+        base_url = system_params.system_url
+    elif hasattr(settings, 'BASE_URL') and settings.BASE_URL:
+        base_url = settings.BASE_URL
+        
+    # 使用正確的URL路徑: building-manager/respond-token/<token>
+    form_url = f"{base_url}/building-manager/respond-token/{token.token}"
+    
+    # 發送 LINE 通知
     from app.services.line_bot import line_bot_service
     line_notification_sent = await line_bot_service.send_building_request_notification(
         db, request_id=request_id, form_url=form_url
     )
+    
+    # 記錄通知發送結果
+    from app.services.logging import logging_service
+    if line_notification_sent:
+        await logging_service.info(
+            db,
+            component="line",
+            message=f"成功發送大樓管理員請求通知",
+            details={"requestId": request_id, "formUrl": form_url},
+            user_id=current_user.id,
+            request_id=request_id
+        )
+    else:
+        await logging_service.warning(
+            db,
+            component="line",
+            message=f"發送大樓管理員請求通知失敗",
+            details={"requestId": request_id, "formUrl": form_url},
+            user_id=current_user.id,
+            request_id=request_id
+        )
 
     return {
         "success": True,

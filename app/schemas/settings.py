@@ -108,7 +108,17 @@ class LineBotSettingsResponse(ResponseBase):
             "targetId": "U1234567890abcdef1234567890abcdef",
             "notificationTemplates": {
                 "buildingManagerRequest": "您好，NTUNHS設備借用系統有新的借用申請需要回應。請點擊以下連結填寫可提供的器材數量：{{formUrl}}",
-                "allocationComplete": "{{buildingName}}大樓管理員，NTUNHS設備借用系統已完成器材分配，請協助準備借用申請{{requestId}}的器材。",
+                "allocationComplete": """{{buildingName}}大樓管理員，您好：
+
+NTUNHS設備借用系統已完成器材分配，請協助準備以下借用申請的器材：
+
+申請編號: {{requestId}}
+借用日期: {{dates}}
+
+分配器材清單:
+{{detail}}
+
+請於借用日期前備妥上述器材，謝謝您的協助！"""
             }
         }
     )
@@ -188,6 +198,7 @@ class SystemParameters(BaseModel):
     enableEmailNotifications: bool = Field(..., description="是否啟用電子郵件通知")
     enableLineNotifications: bool = Field(..., description="是否啟用 LINE 通知")
     systemMaintenanceMode: bool = Field(..., description="系統維護模式")
+    systemUrl: Optional[str] = Field(None, description="系統基礎URL，用於LINE通知中的連結")
 
 
 class SystemParametersRequest(BaseModel):
@@ -195,7 +206,15 @@ class SystemParametersRequest(BaseModel):
 
 
 class SystemParametersResponse(ResponseBase):
-    data: dict = Field(..., example={"parameters": {}})
+    data: dict = Field(..., example={"parameters": {
+        "requestExpiryDays": 30,
+        "responseFormValidityHours": 48,
+        "maxItemsPerRequest": 10,
+        "enableEmailNotifications": True,
+        "enableLineNotifications": True,
+        "systemMaintenanceMode": False,
+        "systemUrl": "https://equipment.ntunhs.edu.tw"
+    }})
 
 
 class SystemParametersUpdateResponse(ResponseBase):

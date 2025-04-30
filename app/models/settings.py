@@ -62,6 +62,7 @@ class SystemParameters(Base):
     enable_email_notifications = Column(Boolean, nullable=False, default=True)
     enable_line_notifications = Column(Boolean, nullable=False, default=True)
     system_maintenance_mode = Column(Boolean, nullable=False, default=False)
+    system_url = Column(String(255), nullable=True)  # 新增系統URL欄位，用於LINE通知
     updated_at = Column(
         DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
     )
