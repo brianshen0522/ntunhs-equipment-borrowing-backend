@@ -87,9 +87,42 @@ class CRUDAllocation(CRUDBase[Allocation, AllocationCreate, Any]):
 
         # Mark all building response tokens as finished
         await crud_response.mark_tokens_as_finished(db, request_id=request_id)
-
+        
         await db.commit()
         await db.refresh(request)
+        
+        # 發送LINE通知給相關大樓管理員 - 新增的部分
+        try:
+            # 獲取所有分配的大樓
+            building_ids = set()
+            for allocation in obj_in.allocations:
+                if allocation.approvedQuantity > 0:
+                    for building_allocation in allocation.buildingAllocations:
+                        building_ids.add(building_allocation.buildingId)
+            
+            # 為每個大樓發送通知
+            from app.services.line_bot import line_bot_service
+            for building_id in building_ids:
+                # 獲取大樓名稱
+                building_query = select(Building).where(Building.id == building_id)
+                building_result = await db.execute(building_query)
+                building = building_result.scalars().first()
+                
+                if building:
+                    # 發送分配完成通知
+                    await line_bot_service.send_allocation_complete_notification(
+                        db, request_id=request_id, building_name=building.name
+                    )
+        except Exception as e:
+            # 記錄錯誤，但不中斷流程
+            await logging_service.error(
+                db,
+                component="line",
+                message=f"發送分配完成通知失敗",
+                details=str(e),
+                request_id=request_id
+            )
+        
         return request
 
     async def generate_pdf(self, db: AsyncSession, *, request_id: str) -> Optional[str]:

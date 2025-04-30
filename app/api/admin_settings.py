@@ -79,10 +79,13 @@ async def get_line_bot_settings(
             }
         )
 
+    # 返回完整的令牌
+    channel_access_token = settings.channel_access_token if settings.channel_access_token else ""
+
     return {
         "success": True,
         "data": {
-            "channelAccessToken": "encrypted_token_placeholder",  # 為安全起見不返回實際令牌
+            "channelAccessToken": channel_access_token,
             "targetId": settings.target_id,
             "notificationTemplates": {
                 "buildingManagerRequest": settings.building_request_template,
@@ -90,7 +93,6 @@ async def get_line_bot_settings(
             }
         }
     }
-
 
 @router.put("/line-bot-settings", response_model=LineBotSettingsUpdateResponse)
 async def update_line_bot_settings(

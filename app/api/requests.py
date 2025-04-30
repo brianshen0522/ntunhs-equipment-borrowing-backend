@@ -294,7 +294,7 @@ async def approve_inquiry(
     """
     # 同意詢問
     request = await crud_request.approve_inquiry(db, request_id=request_id, operator_id=current_user.id)
-    
+
     if not request:
         # 檢查申請是否存在
         request_detail = await crud_request.get_request_detail(db, request_id=request_id)
@@ -309,7 +309,7 @@ async def approve_inquiry(
                     }
                 }
             )
-        
+
         # 檢查狀態
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -324,13 +324,19 @@ async def approve_inquiry(
                 }
             }
         )
-    
+
     # 創建回覆令牌
     token = await crud_response.create_token(db, request_id=request_id)
     
-    # 實際應用中這裡會發送 LINE 通知
-    line_notification_sent = True
+    # 構建填表表單URL
+    form_url = f"{request.base_url}/building-response/{token.token}" if hasattr(request, 'base_url') else f"/building-response/{token.token}"
     
+    # 實際發送 LINE 通知
+    from app.services.line_bot import line_bot_service
+    line_notification_sent = await line_bot_service.send_building_request_notification(
+        db, request_id=request_id, form_url=form_url
+    )
+
     return {
         "success": True,
         "data": {
@@ -339,7 +345,6 @@ async def approve_inquiry(
             "lineNotificationSent": line_notification_sent,
         }
     }
-
 
 @router.get("/{request_id}/building-responses", response_model=BuildingResponseListResponse)
 async def get_building_responses(

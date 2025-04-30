@@ -29,18 +29,18 @@ class LineBotService:
     ) -> bool:
         """
         發送LINE推播訊息
-        
+
         Args:
             db: 資料庫連接
             message: 要發送的訊息
             settings: LINE Bot設定 (可選，若未提供則自動獲取)
-            
+
         Returns:
             bool: 是否發送成功
         """
         if not settings:
             settings = await cls.get_settings(db)
-            
+
         if not settings:
             # 記錄錯誤
             log = SystemLog(
@@ -52,7 +52,20 @@ class LineBotService:
             db.add(log)
             await db.commit()
             return False
-            
+
+        # 檢查target_id是否存在且有效
+        if not settings.target_id or settings.target_id.strip() == "":
+            # 記錄錯誤
+            log = SystemLog(
+                level="error",
+                component="line",
+                message=f"LINE Bot target_id 未設定或無效，無法發送通知訊息",
+                details=json.dumps({"message": message[:100] + "..." if len(message) > 100 else message}),
+            )
+            db.add(log)
+            await db.commit()
+            return False
+
         try:
             # 準備請求數據
             push_data = {
@@ -64,13 +77,13 @@ class LineBotService:
                     }
                 ]
             }
-            
+
             # 發送請求到LINE API
             headers = {
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {settings.channel_access_token}"
             }
-            
+
             async with httpx.AsyncClient() as client:
                 response = await client.post(
                     "https://api.line.me/v2/bot/message/push",
@@ -78,7 +91,7 @@ class LineBotService:
                     headers=headers,
                     timeout=10.0
                 )
-                
+
                 if response.status_code == 200:
                     # 記錄成功
                     log = SystemLog(
@@ -108,7 +121,7 @@ class LineBotService:
                     db.add(log)
                     await db.commit()
                     return False
-                
+
         except Exception as e:
             # 記錄錯誤
             log = SystemLog(
@@ -155,7 +168,21 @@ class LineBotService:
 
         # 準備訊息
         message = settings.building_request_template.replace("{{formUrl}}", form_url)
-        
+
+        # 記錄發送嘗試
+        log = SystemLog(
+            level="info",
+            component="line",
+            message=f"嘗試發送大樓管理員請求填表通知",
+            details=json.dumps({
+                "requestId": request_id, 
+                "formUrl": form_url,
+                "targetId": settings.target_id
+            })
+        )
+        db.add(log)
+        await db.commit()
+
         # 發送訊息
         return await cls.send_push_message(db, message, settings)
 
@@ -189,7 +216,21 @@ class LineBotService:
 
         # 準備訊息
         message = settings.allocation_complete_template.replace("{{buildingName}}", building_name).replace("{{requestId}}", request_id)
-        
+
+        # 記錄發送嘗試
+        log = SystemLog(
+            level="info",
+            component="line",
+            message=f"嘗試發送分配完成通知",
+            details=json.dumps({
+                "requestId": request_id, 
+                "buildingName": building_name,
+                "targetId": settings.target_id
+            })
+        )
+        db.add(log)
+        await db.commit()
+
         # 發送訊息
         return await cls.send_push_message(db, message, settings)
 

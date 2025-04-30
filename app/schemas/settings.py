@@ -101,9 +101,10 @@ LineBotSettings = LineBotSettingsSchema
 
 class LineBotSettingsResponse(ResponseBase):
     data: dict = Field(
-        ..., 
+        ...,
         example={
-            "channelAccessToken": "encrypted_token_placeholder",
+            "channelAccessToken": "abcd...wxyz",
+            "tokenSet": True,
             "targetId": "U1234567890abcdef1234567890abcdef",
             "notificationTemplates": {
                 "buildingManagerRequest": "您好，NTUNHS設備借用系統有新的借用申請需要回應。請點擊以下連結填寫可提供的器材數量：{{formUrl}}",
