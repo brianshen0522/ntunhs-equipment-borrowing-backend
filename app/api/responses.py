@@ -35,21 +35,7 @@ async def get_form_data(
                 }
             }
         )
-    
-    # 檢查令牌是否過期
-    from datetime import datetime
-    if token_obj.expires_at < datetime.utcnow():
-        raise HTTPException(
-            status_code=status.HTTP_410_GONE,
-            detail={
-                "success": False,
-                "error": {
-                    "code": "EXPIRED",
-                    "message": "填表連結已過期"
-                }
-            }
-        )
-    
+
     # 獲取表單數據
     form_data = await crud_response.get_form_data(db, token=response_token)
     if not form_data:
@@ -63,7 +49,7 @@ async def get_form_data(
                 }
             }
         )
-    
+
     return {
         "success": True,
         "data": form_data,
@@ -82,7 +68,7 @@ async def submit_response(
     """
     # 獲取客戶端 IP
     client_ip = request.client.host if request else None
-    
+
     # 檢查令牌是否有效
     token_obj = await crud_response.get_token_by_token(db, token=response_token)
     if not token_obj:
@@ -96,7 +82,7 @@ async def submit_response(
                 }
             }
         )
-    
+
     # 檢查令牌是否過期
     from datetime import datetime
     if token_obj.expires_at < datetime.utcnow():
@@ -110,12 +96,25 @@ async def submit_response(
                 }
             }
         )
-    
+
+    # 檢查令牌是否已標記為完成（分配已完成）
+    if token_obj.is_finished:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "FORM_COMPLETED",
+                    "message": "此表單已完成分配，無法再次提交"
+                }
+            }
+        )
+
     # 提交回覆
     response = await crud_response.submit_response(
         db, token=response_token, obj_in=response_in, ip_address=client_ip
     )
-    
+
     if not response:
         # 檢查是否是參數無效
         form_data = await crud_response.get_form_data(db, token=response_token)
@@ -130,7 +129,7 @@ async def submit_response(
                     }
                 }
             )
-        
+
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={
@@ -147,7 +146,7 @@ async def submit_response(
                 }
             }
         )
-    
+
     # 獲取大樓名稱
     from sqlalchemy import select
     from app.models.buildings import Building
@@ -155,7 +154,7 @@ async def submit_response(
     building_result = await db.execute(building_query)
     building = building_result.scalars().first()
     building_name = building.name if building else "未知大樓"
-    
+
     return {
         "success": True,
         "data": {

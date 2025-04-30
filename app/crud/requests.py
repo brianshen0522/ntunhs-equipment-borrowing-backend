@@ -241,19 +241,24 @@ class CRUDRequest(CRUDBase[Request, RequestCreate, Any]):
             "items": items,
             "statusHistory": status_history,
         }
-        
-        # 如果状态是 pending_building_response，添加响应令牌
-        if request.status == "pending_building_response":
+
+        # 如果状态是 pending_building_response 或 pending_allocation，添加响应令牌
+        if request.status in ["pending_building_response", "pending_allocation"]:
             from app.models.responses import BuildingResponseToken
             # 獲取回覆令牌
             tokens_query = (
                 select(BuildingResponseToken)
-                .where(BuildingResponseToken.request_id == request_id)
+                .where(
+                    and_(
+                        BuildingResponseToken.request_id == request_id,
+                        BuildingResponseToken.is_finished == False  # Only include active tokens
+                    )
+                )
                 .order_by(BuildingResponseToken.created_at.desc())
             )
             tokens_result = await db.execute(tokens_query)
             tokens = tokens_result.scalars().all()
-            
+
             response_tokens = []
             for token in tokens:
                 response_tokens.append({
@@ -261,9 +266,10 @@ class CRUDRequest(CRUDBase[Request, RequestCreate, Any]):
                     "token": token.token,
                     "createdAt": token.created_at,
                     "expiresAt": token.expires_at,
-                    "isUsed": token.is_used
+                    "isUsed": token.is_used,
+                    "isFinished": token.is_finished  # Include the new is_finished flag
                 })
-            
+
             detail["responseTokens"] = response_tokens
 
         return detail

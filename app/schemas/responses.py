@@ -18,6 +18,14 @@ class BuildingResponseBase(BaseModel):
     items: List[ResponseItemBase] = Field(..., description="回覆項目")
 
 
+# Building response data model for display
+class BuildingResponseData(BaseModel):
+    buildingId: str = Field(..., description="大樓ID")
+    buildingName: str = Field(..., description="大樓名稱")
+    items: List[Dict[str, Any]] = Field(..., description="回覆項目")
+    submittedAt: Optional[datetime] = Field(None, description="提交時間")
+
+
 # 請求模型
 class BuildingResponseCreate(BuildingResponseBase):
     pass
@@ -51,6 +59,32 @@ class BuildingResponseFormData(ResponseBase):
                 "buildingId": "bldg_001",
                 "items": [],
             },
+            "allBuildingResponses": [
+                {
+                    "buildingId": "bldg_001",
+                    "buildingName": "行政大樓",
+                    "items": [
+                        {
+                            "itemId": "item_001",
+                            "equipmentName": "摺疊桌",
+                            "availableQuantity": 5,
+                        }
+                    ],
+                    "submittedAt": "2025-04-27T14:20:30Z",
+                },
+                {
+                    "buildingId": "bldg_002",
+                    "buildingName": "護理學院大樓",
+                    "items": [
+                        {
+                            "itemId": "item_001",
+                            "equipmentName": "摺疊桌",
+                            "availableQuantity": 3,
+                        }
+                    ],
+                    "submittedAt": "2025-04-27T16:45:20Z",
+                }
+            ],
         },
     )
 

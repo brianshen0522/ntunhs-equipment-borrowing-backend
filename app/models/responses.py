@@ -29,6 +29,7 @@ class BuildingResponseToken(Base):
         default=lambda: datetime.utcnow() + timedelta(hours=settings.RESPONSE_FORM_VALIDITY_HOURS),
     )
     is_used = Column(Boolean, nullable=False, default=False)
+    is_finished = Column(Boolean, nullable=False, default=False)  # New field to track if token is finished (assignment done)
 
     # 關聯
     request = relationship("Request", back_populates="response_tokens")

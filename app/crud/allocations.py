@@ -13,6 +13,7 @@ from app.models.buildings import Building
 from app.models.equipment import Equipment
 from app.models.users import User
 from app.schemas.allocations import AllocationCreate, ItemAllocationBase
+from app.crud.responses import response as crud_response
 
 
 class CRUDAllocation(CRUDBase[Allocation, AllocationCreate, Any]):
@@ -28,34 +29,34 @@ class CRUDAllocation(CRUDBase[Allocation, AllocationCreate, Any]):
         )
         result = await db.execute(query)
         request = result.scalars().first()
-        
+
         if not request:
             return None
-        
+
         # 獲取申請項目
         items_query = select(RequestItem).where(RequestItem.request_id == request_id)
         items_result = await db.execute(items_query)
         items = items_result.scalars().all()
-        
+
         # 創建項目ID到物件的映射
         items_map = {item.id: item for item in items}
-        
+
         # 為每個項目進行分配
         for allocation in obj_in.allocations:
             # 檢查項目是否存在
             if allocation.itemId not in items_map:
                 continue
-            
+
             # 更新核准數量
             item = items_map[allocation.itemId]
             item.approved_quantity = allocation.approvedQuantity
-            
+
             # 刪除現有分配
             allocations_query = select(Allocation).where(Allocation.request_item_id == item.id)
             allocations_result = await db.execute(allocations_query)
             for existing_allocation in allocations_result.scalars().all():
                 await db.delete(existing_allocation)
-            
+
             # 如果核准數量大於0，創建新分配
             if allocation.approvedQuantity > 0:
                 for building_allocation in allocation.buildingAllocations:
@@ -67,12 +68,12 @@ class CRUDAllocation(CRUDBase[Allocation, AllocationCreate, Any]):
                         allocated_by=operator_id,
                     )
                     db.add(db_allocation)
-        
+
         # 更新申請狀態和備註
         request.status = "completed"
         request.notes = obj_in.notes
         request.updated_at = datetime.utcnow()
-        
+
         # 添加狀態歷史
         from app.models.requests import RequestStatusHistory
         status_history = RequestStatusHistory(
@@ -83,14 +84,17 @@ class CRUDAllocation(CRUDBase[Allocation, AllocationCreate, Any]):
             notes=obj_in.notes if obj_in.notes else "分配完成",
         )
         db.add(status_history)
-        
+
+        # Mark all building response tokens as finished
+        await crud_response.mark_tokens_as_finished(db, request_id=request_id)
+
         await db.commit()
         await db.refresh(request)
         return request
 
     async def generate_pdf(self, db: AsyncSession, *, request_id: str) -> Optional[str]:
         """生成借用單 PDF
-        
+
         在實際應用中，這裡會使用 PDF 生成庫生成文件，
         此處僅模擬返回檔案路徑
         """
@@ -100,22 +104,22 @@ class CRUDAllocation(CRUDBase[Allocation, AllocationCreate, Any]):
         )
         result = await db.execute(query)
         request = result.scalars().first()
-        
+
         if not request:
             return None
-        
+
         # 模擬 PDF 生成並返回路徑
         pdf_path = f"storage/requests/{request_id}.pdf"
-        
+
         # 更新 PDF 路徑
         request.pdf_path = pdf_path
         await db.commit()
-        
+
         return pdf_path
 
     async def send_email(self, db: AsyncSession, *, request_id: str) -> Optional[str]:
         """發送借用單郵件
-        
+
         在實際應用中，這裡會使用 SMTP 服務發送郵件，
         此處僅模擬發送過程
         """
@@ -127,23 +131,23 @@ class CRUDAllocation(CRUDBase[Allocation, AllocationCreate, Any]):
         )
         result = await db.execute(query)
         request_result = result.first()
-        
+
         if not request_result:
             return None
-        
+
         request, email = request_result
-        
+
         # 檢查是否有 PDF 路徑
         if not request.pdf_path:
             # 嘗試生成 PDF
             pdf_path = await self.generate_pdf(db, request_id=request_id)
             if not pdf_path:
                 return None
-        
+
         # 模擬發送郵件
         request.email_sent = True
         await db.commit()
-        
+
         return email
 
 
