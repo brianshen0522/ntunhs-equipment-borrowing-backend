@@ -57,7 +57,13 @@ async def login(
 
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="帳號或密碼錯誤",
+            detail={
+                "success": False,
+                "error": {
+                    "code": "INVALID_CREDENTIALS",
+                    "message": "帳號或密碼錯誤"
+                }
+            }
         )
 
     # 獲取或創建使用者
@@ -118,7 +124,13 @@ async def login(
 
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="使用者沒有所選角色的權限",
+                detail={
+                    "success": False,
+                    "error": {
+                        "code": "ROLE_NOT_AUTHORIZED",
+                        "message": "使用者沒有所選角色的權限"
+                    }
+                }
             )
         role = login_data.selectedRole
     else:

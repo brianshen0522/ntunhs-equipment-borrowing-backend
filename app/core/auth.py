@@ -219,7 +219,13 @@ async def get_current_user(
     """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="無效的認證憑證",
+        detail={
+            "success": False,
+            "error": {
+                "code": "INVALID_TOKEN",
+                "message": "無效的認證憑證"
+            }
+        },
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
@@ -300,6 +306,13 @@ async def get_current_user_with_role(
             user_id=current_user.id
         )
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="權限不足，需要 {} 角色".format(required_role)
+            status_code=status.HTTP_403_FORBIDDEN, 
+            detail={
+                "success": False,
+                "error": {
+                    "code": "INSUFFICIENT_PERMISSIONS",
+                    "message": "權限不足，需要 {} 角色".format(required_role)
+                }
+            }
         )
     return current_user
